@@ -62,6 +62,64 @@ class CMAPSS_Predictor:
         predicted_rul = self.rf_model.predict([X])[0]
         return predicted_rul
 
+    def predict_batch(self, filepath, critical_threshold=30):
+        """
+        Reads a CSV or TXT file containing multiple engines, predicts the RUL for each,
+        classifies them as Normal or Abnormal, and generates a plot.
+        
+        Parameters:
+        filepath (str): Path to the .csv or .txt file.
+        critical_threshold (int): RUL below this value is classified as 'Abnormal/Critical'.
+        """
+        import matplotlib.pyplot as plt
+        import os
+        
+        print(f"Loading data from {filepath}...")
+        if filepath.endswith('.txt'):
+            # CMAPSS raw format
+            cols = ['unit', 'cycles', 'setting1', 'setting2', 'setting3'] + [f's{i}' for i in range(1, 22)]
+            df = pd.read_csv(filepath, sep=r'\s+', header=None, names=cols)
+        else:
+            # Standard CSV format (assumes it has the proper headers)
+            df = pd.read_csv(filepath)
+            
+        units = df['unit'].unique()
+        print(f"Found {len(units)} engines in the dataset. Predicting RUL...")
+        
+        results = []
+        for unit_id in units:
+            unit_data = df[df['unit'] == unit_id]
+            rul = self.predict_engine_rul(unit_data)
+            status = "Abnormal (Critical)" if rul <= critical_threshold else "Normal"
+            results.append({'Engine': unit_id, 'Predicted RUL': rul, 'Status': status})
+            
+        results_df = pd.DataFrame(results)
+        
+        # --- Plotting ---
+        plt.figure(figsize=(15, 6))
+        colors = ['red' if s == 'Abnormal (Critical)' else 'green' for s in results_df['Status']]
+        bars = plt.bar(results_df['Engine'].astype(str), results_df['Predicted RUL'], color=colors)
+        
+        plt.axhline(y=critical_threshold, color='black', linestyle='--', label=f'Critical Threshold ({critical_threshold} cycles)')
+        plt.title('Predicted Remaining Useful Life (RUL) per Engine')
+        plt.xlabel('Engine Unit ID')
+        plt.ylabel('Predicted RUL (Cycles)')
+        plt.xticks(rotation=90, fontsize=8)
+        plt.legend()
+        plt.tight_layout()
+        
+        plot_path = "rul_predictions_plot.png"
+        plt.savefig(plot_path)
+        plt.close()
+        
+        print(f"\nPredictions complete! Plot saved as '{plot_path}'")
+        print("\n--- Prediction Summary ---")
+        print(f"Total Engines: {len(results_df)}")
+        print(f"Normal Engines: {sum(results_df['Status'] == 'Normal')}")
+        print(f"Abnormal Engines: {sum(results_df['Status'] != 'Normal')}")
+        
+        return results_df
+
 # ==========================================
 # Usage Example
 # ==========================================
@@ -69,13 +127,10 @@ if __name__ == "__main__":
     # Initialize the predictor
     predictor = CMAPSS_Predictor('cmapss_sota_rf_pipeline_compressed.joblib')
     
-    # Let's load the test data for FD001 as an example
-    cols = ['unit', 'cycles', 'setting1', 'setting2', 'setting3'] + [f's{i}' for i in range(1, 22)]
-    test_data = pd.read_csv("CMaps/test_FD001.txt", sep=r'\s+', header=None, names=cols)
+    # Process an entire file (TXT or CSV) and generate the plot!
+    # By default, any engine with RUL <= 30 is flagged as Abnormal.
+    results = predictor.predict_batch("CMaps/test_FD001.txt", critical_threshold=30)
     
-    # Grab all historical data for Engine Unit 1
-    engine_1_data = test_data[test_data['unit'] == 1]
-    
-    # Predict the RUL
-    rul = predictor.predict_engine_rul(engine_1_data)
-    print(f"\nPredicted Remaining Useful Life (RUL) for Engine Unit 1: {rul:.2f} cycles")
+    # Print the first 10 predictions
+    print("\nFirst 10 Engine Predictions:")
+    print(results.head(10).to_string(index=False))
