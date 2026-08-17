@@ -116,8 +116,8 @@ X_train, y_train = create_sequences(full_train, valid_sensors)
 print(f"Training Dataset Shape: {X_train.shape}")
 print("Step 4: Training Optimized Random Forest Regressor")
 rf_model = RandomForestRegressor(
-    n_estimators=100, 
-    max_depth=15, 
+    n_estimators=60, 
+    max_depth=12, 
     min_samples_split=5,
     min_samples_leaf=2,
     n_jobs=-1, 
@@ -134,8 +134,8 @@ artifacts = {
     'settings': settings,
     'sequence_length': SEQUENCE_LENGTH
 }
-joblib.dump(artifacts, 'cmapss_sota_rf_pipeline.joblib')
-print("-> Saved to 'cmapss_sota_rf_pipeline.joblib'")
+joblib.dump(artifacts, 'cmapss_sota_rf_pipeline_compressed.joblib', compress=9)
+print("-> Saved to 'cmapss_sota_rf_pipeline_compressed.joblib'")
 
 print("\nStep 6: Evaluating on Test Datasets")
 y_true_all, y_pred_all = [], []
