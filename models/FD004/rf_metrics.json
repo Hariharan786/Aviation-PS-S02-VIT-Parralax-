@@ -1,0 +1,12 @@
+{
+  "dataset": "FD004",
+  "model": "RandomForestRegressor",
+  "trees": 80,
+  "sequence_length": 30,
+  "train_windows": 43118,
+  "fit_windows": 12000,
+  "validation_engines": 49,
+  "MAE_cycles": 11.786555648324839,
+  "RMSE_cycles": 17.45778667138296,
+  "R2": 0.8216134203332423
+}
