@@ -17,8 +17,47 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "model"))
 from hybrid_predictor import predict_file as predict_hybrid
 from condition_aware_anomaly import load, score
+from bearing_vibration import build_bearing_summary, add_bearing_status, synthesize_cycle_waveform, vibration_spectrum
 
 st.set_page_config(page_title="AeroGuard PS-S02", page_icon="✈️", layout="wide")
+
+# ---------------------------------------------------------------------------
+# Custom CSS Injection for Fonts and Purplish Hues
+# ---------------------------------------------------------------------------
+custom_css = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&family=Rubik:wght@400;500;700&display=swap');
+
+/* Apply Rubik to all general text */
+html, body, [class*="css"], p, div, span, label, li {
+    font-family: 'Rubik', sans-serif !important;
+}
+
+/* Apply Lato to all headings */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Lato', sans-serif !important;
+}
+
+/* Override primary button colors to a purplish shade */
+div.stButton > button[kind="primary"] {
+    background-color: #6b21a8 !important; 
+    border-color: #6b21a8 !important;
+    color: white !important;
+}
+div.stButton > button[kind="primary"]:hover {
+    background-color: #581c87 !important;
+    border-color: #581c87 !important;
+}
+
+/* General link and accent color overrides */
+a {
+    color: #6b21a8 !important;
+}
+</style>
+"""
+st.markdown(custom_css, unsafe_allow_html=True)
+# ---------------------------------------------------------------------------
+
 st.title("✈️ AeroGuard — Aircraft Engine Health & Predictive Maintenance")
 st.caption("PS-S02 | LSTM + Random Forest ensemble RUL + anomaly detection + sensor diagnostics")
 
@@ -182,6 +221,65 @@ def txt_from_raw_text(raw_text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Bearing vibration analysis
+# ---------------------------------------------------------------------------
+def render_bearing_analysis(telemetry_df, title_prefix=""):
+    if telemetry_df is None or telemetry_df.empty:
+        return
+    try:
+        bearing = add_bearing_status(build_bearing_summary(telemetry_df, sample_rate_hz=2048, duration_s=0.5, seed=42))
+    except Exception as exc:
+        st.warning(f"Bearing vibration analysis unavailable: {exc}")
+        return
+
+    st.subheader("🛞 Bearing Vibration Analysis")
+    st.caption("Physics-informed synthetic accelerometer signal. Bearing vibration now feeds the integrated engine health/RUL decision. Mission timing is estimated separately from Mach, altitude, throttle/load and altitude change; the waveform below is a short diagnostic capture, not the whole mission timeline.")
+
+    latest = bearing.sort_values(["engine_id", "cycle"]).groupby("engine_id").tail(1).copy()
+    critical = int((latest["bearing_status"] == "CRITICAL").sum())
+    warning = int(latest["bearing_status"].isin(["WARNING", "WATCH"]).sum())
+    avg_risk = float(latest["bearing_risk_score"].mean())
+    q1, q2, q3 = st.columns(3)
+    q1.metric("Bearing risk", f"{avg_risk:.1f}/100")
+    q2.metric("Warning / watch", warning)
+    q3.metric("Critical", critical)
+
+    st.dataframe(latest[["engine_id", "cycle", "mach", "altitude_ft", "throttle_proxy_pct", "airspeed_mps", "core_rpm", "cycle_duration_s", "flight_time_min_cumulative", "bpfo_hz", "bpfi_hz", "bsf_hz", "rms_g", "crest_factor", "kurtosis", "bearing_risk_score", "bearing_status"]], use_container_width=True, hide_index=True)
+
+    engines = sorted(bearing.engine_id.unique())
+    selected_engine = st.selectbox("Bearing waveform engine", engines, key=f"bearing_engine_{title_prefix}")
+    cycles = sorted(bearing.loc[bearing.engine_id == selected_engine, "cycle"].astype(int).unique())
+    selected_cycle = st.selectbox("Bearing waveform cycle", cycles, index=len(cycles)-1, key=f"bearing_cycle_{title_prefix}")
+    row = telemetry_df[(telemetry_df.engine_id.astype(int) == int(selected_engine)) & (telemetry_df.cycle.astype(int) == int(selected_cycle))].iloc[0]
+    waveform, meta = synthesize_cycle_waveform(row, sample_rate_hz=2048, duration_s=0.5, seed=42)
+
+    w1, w2, w3, w4 = st.columns(4)
+    w1.metric("Mach", f"{meta['mach']:.3f}")
+    w2.metric("Core speed", f"{meta['core_rpm']:.0f} rpm")
+    w3.metric("RMS", f"{meta['rms_g']:.3f} g")
+    w4.metric("Crest factor", f"{meta['crest_factor']:.2f}")
+
+    st.line_chart(waveform.set_index("time_s")["vibration_g"], height=260)
+    spectrum = vibration_spectrum(waveform, 2048, 1200.0)
+    st.line_chart(spectrum.set_index("frequency_hz")["amplitude_g"], height=240)
+    st.caption(f"Expected bearing frequencies: FTF {meta['ftf_hz']:.1f} Hz · BPFO {meta['bpfo_hz']:.1f} Hz · BPFI {meta['bpfi_hz']:.1f} Hz · BSF {meta['bsf_hz']:.1f} Hz. Elevated energy near these characteristic frequencies is used as a bearing-fault indicator.")
+
+    st.download_button(
+        "Download bearing cycle summary",
+        bearing.to_csv(index=False).encode("utf-8"),
+        "bearing_vibration_summary.csv",
+        "text/csv",
+        key=f"bearing_summary_{title_prefix}",
+    )
+    st.download_button(
+        "Download selected bearing waveform",
+        waveform.to_csv(index=False).encode("utf-8"),
+        f"bearing_engine_{selected_engine}_cycle_{selected_cycle}_waveform.csv",
+        "text/csv",
+        key=f"bearing_wave_{title_prefix}",
+    )
+
+# ---------------------------------------------------------------------------
 # ── LIVE TELEMETRY MODE ─────────────────────────────────────────────────────
 # ---------------------------------------------------------------------------
 if mode == "🔴 Live Telemetry":
@@ -257,22 +355,15 @@ if mode == "🔴 Live Telemetry":
     latest_anom = anom.sort_values(["engine_id", "cycle"]).groupby("engine_id").tail(1)
     latest_rul  = fleet_rul.sort_values(["engine_id", "cycle"]).groupby("engine_id").tail(1)
     fleet = latest_rul.merge(
-        latest_anom[[
-            "engine_id", "cycle", "anomaly_score", "abnormal_condition",
-            "abnormal_sensor_count", "abnormal_sensors", "trend_status", "maintenance_signal"
-        ]],
+        latest_anom[["engine_id", "cycle", "anomaly_score", "abnormal_condition",
+                     "abnormal_sensor_count", "abnormal_sensors", "trend_status"]],
         on=["engine_id", "cycle"], how="left",
     )
+    # predict_hybrid already integrated bearing health, variable flight time,
+    # composite health, and bearing-aware maintenance recommendation.
 
     def combined(row):
-        if row.abnormal_condition == "CRITICAL ANOMALY" or row.ensemble_status == "CRITICAL":
-            return "CRITICAL"
-        if row.abnormal_condition == "WARNING" and row.ensemble_status in ["WARNING", "DEGRADING"]:
-            return "WARNING + ANOMALY"
-        if row.ensemble_status == "WARNING":   return "WARNING"
-        if row.ensemble_status == "DEGRADING": return "DEGRADING"
-        if row.abnormal_condition == "WARNING": return "ANOMALY"
-        return "HEALTHY"
+        return str(row.get("overall_status", row.get("ensemble_status", "HEALTHY")))
 
     fleet["combined_status"] = fleet.apply(combined, axis=1)
     critical = int((fleet.combined_status == "CRITICAL").sum())
@@ -281,7 +372,7 @@ if mode == "🔴 Live Telemetry":
 
     a, b, c, d, e = st.columns(5)
     a.metric("Engines",          len(fleet))
-    b.metric("Ensemble Avg RUL", f"{fleet.ensemble_RUL_cycles.mean():.1f} cycles")
+    b.metric("Integrated Avg RUL", f"{fleet.overall_RUL_cycles.mean():.1f} cycles")
     c.metric("Abnormal",         abnormal)
     d.metric("Warning",          warning)
     e.metric("Critical",         critical)
@@ -296,10 +387,11 @@ if mode == "🔴 Live Telemetry":
     st.subheader("🚦 Current Engine Health")
     st.dataframe(
         fleet[[
-            "engine_id", "cycle", "lstm_RUL_cycles", "rf_RUL_cycles",
-            "ensemble_RUL_cycles", "ensemble_health_score", "ensemble_status",
-            "anomaly_score", "abnormal_condition", "abnormal_sensor_count",
-            "abnormal_sensors", "trend_status", "combined_status", "maintenance_signal",
+            "engine_id", "cycle", "overall_RUL_cycles", "ensemble_RUL_cycles", "overall_health_score",
+            "bearing_risk_score", "bearing_status", "cycle_duration_s", "flight_time_min_cumulative",
+            "lstm_RUL_cycles", "rf_RUL_cycles", "anomaly_score", "abnormal_condition",
+            "abnormal_sensor_count", "abnormal_sensors", "trend_status", "combined_status",
+            "overall_maintenance_recommendation", "maintenance_signal",
         ]],
         use_container_width=True, hide_index=True,
     )
@@ -309,7 +401,7 @@ if mode == "🔴 Live Telemetry":
     trend  = anom[anom.engine_id == selected].sort_values("cycle").copy()
     ruleng = fleet_rul[fleet_rul.engine_id == selected].sort_values("cycle")
     st.line_chart(trend.set_index("cycle")[["anomaly_score", "max_sensor_z"]])
-    st.line_chart(ruleng.set_index("cycle")[["lstm_RUL_cycles", "rf_RUL_cycles", "ensemble_RUL_cycles", "ensemble_health_score"]])
+    st.line_chart(ruleng.set_index("cycle")[["overall_RUL_cycles", "overall_health_score"]])
     st.write(
         f"Engine {selected}: anomaly **{trend.anomaly_score.iloc[-1]:.3f}**, "
         f"trend **{trend.trend_status.iloc[-1]}**, "
@@ -334,20 +426,23 @@ if mode == "🔴 Live Telemetry":
 
     st.subheader("🛠 Maintenance Recommendation")
     st.dataframe(
-        fleet.sort_values(["ensemble_RUL_cycles", "anomaly_score"])[[
-            "engine_id", "ensemble_RUL_cycles", "ensemble_health_score",
-            "anomaly_score", "abnormal_sensors", "trend_status",
-            "combined_status", "maintenance_signal",
+        fleet.sort_values(["overall_RUL_cycles", "bearing_risk_score", "anomaly_score"])[[
+            "engine_id", "overall_RUL_cycles", "overall_health_score", "bearing_risk_score",
+            "bearing_status", "flight_time_min_cumulative", "anomaly_score", "abnormal_sensors",
+            "trend_status", "combined_status", "overall_maintenance_recommendation",
         ]],
         use_container_width=True, hide_index=True,
     )
 
+    render_bearing_analysis(raw_anom, "live")
+
     def maintenance_priority(row):
-        status = str(row["combined_status"]); signal = str(row["maintenance_signal"])
-        if status == "CRITICAL": return "URGENT"
-        if "WARNING" in status or status in ["ANOMALY", "DEGRADING"]: return "ATTENTION"
-        if "inspection" in signal.lower(): return "ATTENTION"
+        status = str(row["combined_status"]); signal = str(row.get("overall_maintenance_recommendation", row.get("maintenance_signal", "")))
+        if status == "CRITICAL" or signal.startswith("URGENT"): return "URGENT"
+        if "WARNING" in status or status in ["ANOMALY", "DEGRADING"] or "INSPECTION" in signal.upper(): return "ATTENTION"
         return "ROUTINE"
+
+    # upload bearing analysis is rendered after the upload pipeline below
 
     def health_word(status):
         return {
@@ -360,29 +455,28 @@ if mode == "🔴 Live Telemetry":
         }.get(str(status), str(status).lower())
 
     def engine_verbal_summary(row):
-        eid = int(row["engine_id"]); rul = float(row["ensemble_RUL_cycles"])
-        health = float(row["ensemble_health_score"]); anomaly = float(row["anomaly_score"])
+        eid = int(row["engine_id"]); rul = float(row.get("overall_RUL_cycles", row["ensemble_RUL_cycles"]))
+        health = float(row.get("overall_health_score", row["ensemble_health_score"])); anomaly = float(row["anomaly_score"])
+        bearing = float(row.get("bearing_risk_score", 0.0)); bstatus = str(row.get("bearing_status", "NORMAL"))
+        flight_min = float(row.get("flight_time_min_cumulative", 0.0))
         status = health_word(row["combined_status"]); trend = str(row["trend_status"]).lower()
         sensors = str(row["abnormal_sensors"])
         sensor_text = "No individual sensor is currently flagged as abnormal." if sensors in ["", "nan", "None", "[]"] else f"The main sensors flagged are {sensors}."
         priority = maintenance_priority(row)
-        action = (
-            "Immediate engineering inspection is recommended before routine operation." if priority == "URGENT"
-            else "A preventive inspection or increased monitoring is recommended." if priority == "ATTENTION"
-            else "Continue routine monitoring."
-        )
+        action = str(row.get("overall_maintenance_recommendation", "Continue routine monitoring."))
         return (
-            f"Engine {eid} is {status}. Its estimated remaining useful life is about {rul:.0f} cycles, "
-            f"with an estimated health score of {health:.0f} percent. "
+            f"Engine {eid} is {status}. Its integrated remaining useful life is about {rul:.0f} cycles, "
+            f"with an overall health score of {health:.0f} percent. "
+            f"Bearing vibration risk is {bearing:.0f}/100 ({bstatus}), with about {flight_min:.1f} minutes of estimated flight time accumulated in the observed mission. "
             f"The current anomaly score is {anomaly:.2f} and the deterioration trend is {trend}. "
-            f"{sensor_text} {action}"
+            f"{sensor_text} Recommendation: {action}."
         )
 
     def fleet_verbal_summary(fleet_df, dataset_name):
         total = len(fleet_df); crit = int((fleet_df["combined_status"] == "CRITICAL").sum())
         attn  = int(fleet_df["combined_status"].isin(["WARNING","WARNING + ANOMALY","ANOMALY","DEGRADING"]).sum())
         healthy = total - crit - attn
-        avg_rul = float(fleet_df["ensemble_RUL_cycles"].mean()); avg_health = float(fleet_df["ensemble_health_score"].mean())
+        avg_rul = float(fleet_df.get("overall_RUL_cycles", fleet_df["ensemble_RUL_cycles"]).mean()); avg_health = float(fleet_df.get("overall_health_score", fleet_df["ensemble_health_score"]).mean())
         lines = [
             f"{dataset_name} fleet health briefing.",
             f"The system evaluated {total} engine{'s' if total != 1 else ''}.",
@@ -455,18 +549,13 @@ latest_rul  = fleet_rul.sort_values(["engine_id","cycle"]).groupby("engine_id").
 fleet = latest_rul.merge(
     latest_anom[[
         "engine_id","cycle","anomaly_score","abnormal_condition",
-        "abnormal_sensor_count","abnormal_sensors","trend_status","maintenance_signal"
+        "abnormal_sensor_count","abnormal_sensors","trend_status"
     ]],
     on=["engine_id","cycle"], how="left",
 )
 
 def combined(row):
-    if row.abnormal_condition=="CRITICAL ANOMALY" or row.ensemble_status=="CRITICAL": return "CRITICAL"
-    if row.abnormal_condition=="WARNING" and row.ensemble_status in ["WARNING","DEGRADING"]: return "WARNING + ANOMALY"
-    if row.ensemble_status=="WARNING":   return "WARNING"
-    if row.ensemble_status=="DEGRADING": return "DEGRADING"
-    if row.abnormal_condition=="WARNING": return "ANOMALY"
-    return "HEALTHY"
+    return str(row.get("overall_status", row.get("ensemble_status", "HEALTHY")))
 
 fleet["combined_status"] = fleet.apply(combined, axis=1)
 critical = int((fleet.combined_status=="CRITICAL").sum())
@@ -483,9 +572,9 @@ st.caption(f"Ensemble weights: LSTM {ensemble_meta['lstm_weight']:.1%} · Random
 
 st.divider(); st.subheader("🚦 Current Engine Health")
 st.dataframe(fleet[[
-    "engine_id","cycle","lstm_RUL_cycles","rf_RUL_cycles","ensemble_RUL_cycles",
-    "ensemble_health_score","ensemble_status","anomaly_score","abnormal_condition",
-    "abnormal_sensor_count","abnormal_sensors","trend_status","combined_status","maintenance_signal"
+    "engine_id","cycle","overall_RUL_cycles","overall_health_score","bearing_risk_score","bearing_status",
+    "cycle_duration_s","flight_time_min_cumulative","lstm_RUL_cycles","rf_RUL_cycles","anomaly_score","abnormal_condition",
+    "abnormal_sensor_count","abnormal_sensors","trend_status","combined_status","overall_maintenance_recommendation"
 ]], use_container_width=True, hide_index=True)
 
 st.subheader("📉 Deterioration Trends")
@@ -493,7 +582,7 @@ selected = st.selectbox("Engine trend", sorted(anom.engine_id.unique()))
 trend  = anom[anom.engine_id==selected].sort_values("cycle").copy()
 ruleng = fleet_rul[fleet_rul.engine_id==selected].sort_values("cycle")
 st.line_chart(trend.set_index("cycle")[["anomaly_score","max_sensor_z"]])
-st.line_chart(ruleng.set_index("cycle")[["lstm_RUL_cycles","rf_RUL_cycles","ensemble_RUL_cycles","ensemble_health_score"]])
+st.line_chart(ruleng.set_index("cycle")[["overall_RUL_cycles","overall_health_score"]])
 st.write(f"Engine {selected}: anomaly **{trend.anomaly_score.iloc[-1]:.3f}**, trend **{trend.trend_status.iloc[-1]}**, abnormal sensors **{trend.abnormal_sensors.iloc[-1]}**")
 
 st.subheader("📡 Sensor Performance & Abnormality")
@@ -515,27 +604,28 @@ if anom_metrics_path.exists():
     st.dataframe(cm,use_container_width=True)
     st.caption("Evaluation proxy: validation RUL ≥ 80 = normal; RUL ≤ 40 = abnormal; RUL 41–79 excluded.")
 
+render_bearing_analysis(raw, "upload")
+
 def health_word(status):
     return {"HEALTHY":"healthy","DEGRADING":"showing signs of degradation","WARNING":"requiring attention","WARNING + ANOMALY":"showing degradation and abnormal telemetry","ANOMALY":"showing abnormal telemetry","CRITICAL":"in a critical condition"}.get(str(status),str(status).lower())
 
 def maintenance_priority(row):
-    status=str(row["combined_status"]); signal=str(row["maintenance_signal"])
-    if status=="CRITICAL": return "URGENT"
-    if "WARNING" in status or status in ["ANOMALY","DEGRADING"]: return "ATTENTION"
-    if "inspection" in signal.lower(): return "ATTENTION"
+    status=str(row["combined_status"]); signal=str(row.get("overall_maintenance_recommendation", row.get("maintenance_signal", "")))
+    if status=="CRITICAL" or signal.startswith("URGENT"): return "URGENT"
+    if "WARNING" in status or status in ["ANOMALY","DEGRADING"] or "INSPECTION" in signal.upper(): return "ATTENTION"
     return "ROUTINE"
 
 def engine_verbal_summary(row):
-    eid=int(row["engine_id"]); rul=float(row["ensemble_RUL_cycles"]); health=float(row["ensemble_health_score"]); anomaly=float(row["anomaly_score"])
+    eid=int(row["engine_id"]); rul=float(row.get("overall_RUL_cycles",row["ensemble_RUL_cycles"])); health=float(row.get("overall_health_score",row["ensemble_health_score"])); anomaly=float(row["anomaly_score"])
+    bearing=float(row.get("bearing_risk_score",0.0)); bstatus=str(row.get("bearing_status","NORMAL")); flight_min=float(row.get("flight_time_min_cumulative",0.0))
     status=health_word(row["combined_status"]); trend=str(row["trend_status"]).lower(); sensors=str(row["abnormal_sensors"])
     sensor_text="No individual sensor is currently flagged as abnormal." if sensors in ["","nan","None","[]"] else f"The main sensors flagged are {sensors}."
-    priority=maintenance_priority(row)
-    action=("Immediate engineering inspection is recommended before routine operation." if priority=="URGENT" else "A preventive inspection or increased monitoring is recommended." if priority=="ATTENTION" else "Continue routine monitoring.")
-    return (f"Engine {eid} is {status}. Its estimated remaining useful life is about {rul:.0f} cycles, with an estimated health score of {health:.0f} percent. The current anomaly score is {anomaly:.2f} and the deterioration trend is {trend}. {sensor_text} {action}")
+    action=str(row.get("overall_maintenance_recommendation","Continue routine monitoring."))
+    return (f"Engine {eid} is {status}. Its integrated remaining useful life is about {rul:.0f} cycles, with an overall health score of {health:.0f} percent. Bearing vibration risk is {bearing:.0f}/100 ({bstatus}) and the estimated observed flight time is {flight_min:.1f} minutes. The current anomaly score is {anomaly:.2f} and the deterioration trend is {trend}. {sensor_text} Recommendation: {action}.")
 
 def fleet_verbal_summary(fleet_df,dataset_name):
     total=len(fleet_df); crit=int((fleet_df["combined_status"]=="CRITICAL").sum()); attn=int(fleet_df["combined_status"].isin(["WARNING","WARNING + ANOMALY","ANOMALY","DEGRADING"]).sum()); healthy=total-crit-attn
-    avg_rul=float(fleet_df["ensemble_RUL_cycles"].mean()); avg_health=float(fleet_df["ensemble_health_score"].mean())
+    avg_rul=float(fleet_df.get("overall_RUL_cycles",fleet_df["ensemble_RUL_cycles"]).mean()); avg_health=float(fleet_df.get("overall_health_score",fleet_df["ensemble_health_score"]).mean())
     lines=[f"{dataset_name} fleet health briefing.",f"The system evaluated {total} engine{'s' if total!=1 else ''}.",f"On average, the engines have an estimated remaining useful life of about {avg_rul:.0f} cycles and an average health score of {avg_health:.0f} percent."]
     lines.append(f"{crit} engine{'s' if crit!=1 else ''} require urgent attention because the combined health and anomaly assessment is critical." if crit else "No engine is currently classified as critical.")
     lines.append(f"{attn} engine{'s' if attn!=1 else ''} require additional attention because they are degrading, showing abnormal telemetry, or carrying a warning." if attn else "No additional engines are currently flagged for elevated attention.")
@@ -555,5 +645,5 @@ with st.expander("Read the engine-by-engine maintenance briefing"):
 
 st.download_button("Download verbal maintenance briefing",full_brief.encode("utf-8"),f"{dataset}_PS_S02_verbal_maintenance_brief.txt","text/plain")
 st.subheader("🛠 Maintenance Recommendation")
-st.dataframe(fleet.sort_values(["ensemble_RUL_cycles","anomaly_score"])[["engine_id","ensemble_RUL_cycles","ensemble_health_score","anomaly_score","abnormal_sensors","trend_status","combined_status","maintenance_signal"]],use_container_width=True,hide_index=True)
+st.dataframe(fleet.sort_values(["overall_RUL_cycles","bearing_risk_score","anomaly_score"])[["engine_id","overall_RUL_cycles","overall_health_score","bearing_risk_score","bearing_status","flight_time_min_cumulative","anomaly_score","abnormal_sensors","trend_status","combined_status","overall_maintenance_recommendation"]],use_container_width=True,hide_index=True)
 st.download_button("Download combined health/anomaly report",fleet.to_csv(index=False).encode(),f"{dataset}_PS_S02_hybrid_health_report.csv","text/csv")
