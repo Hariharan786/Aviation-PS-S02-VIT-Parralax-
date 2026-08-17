@@ -1,1 +1,1 @@
-# Aviation-PS-S02-VIT-Parralax-
+# Aviation-PS-S02-VIT-Parallax-
