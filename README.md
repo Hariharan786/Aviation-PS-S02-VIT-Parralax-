@@ -41,12 +41,36 @@ The dashboard contains:
 
 ## Run
 
+The project now includes two modes:
+1. **Live Telemetry:** Generates physics-based data on the fly and streams it to the dashboard.
+2. **Upload File:** Upload custom C-MAPSS telemetry for evaluation.
+
+**Important:** Both the backend API server and the Streamlit frontend must be running simultaneously for the Live Telemetry mode to work.
+
+### Using the batch file (Recommended for Windows)
+
+Simply double-click the `run_frontend.bat` file, or run it in your terminal:
+```powershell
+.\run_frontend.bat
+```
+This automatically starts both the FastAPI simulation server on port 8000 and the Streamlit frontend on port 8501.
+
+### Manual start (Two terminals)
+
+If you prefer to start them manually, open two terminal windows:
+
+**Terminal 1 (Backend API):**
 ```powershell
 python -m pip install -r requirements.txt
+python api_server.py
+```
+
+**Terminal 2 (Frontend UI):**
+```powershell
 python -m streamlit run app/app.py
 ```
 
-Select FD001–FD004 and upload either the NASA whitespace TXT or a 26-column CSV with or without the C-MAPSS header.
+Once running, select FD001–FD004 from the sidebar and use the **Live Telemetry** controls or upload either the NASA whitespace TXT or a 26-column CSV with or without the C-MAPSS header.
 
 ## Retrain all four datasets
 
