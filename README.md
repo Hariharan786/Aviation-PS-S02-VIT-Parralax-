@@ -1,6 +1,6 @@
-# AeroGuard PS-S02 — Hybrid LSTM + Random Forest
+# FlightPret
 
-This version combines the existing AeroGuard LSTM RUL model and anomaly pipeline with a Random Forest RUL model based on the uploaded `predictor.py` design.
+This version combines the existing FlightPret LSTM RUL model and anomaly pipeline with a Random Forest RUL model based on the uploaded `predictor.py` design.
 
 ## Hybrid architecture
 
