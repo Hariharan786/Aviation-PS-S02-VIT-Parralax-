@@ -14,6 +14,7 @@ except ImportError:
     _HTTPX_OK = False
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "model"))
 from hybrid_predictor import predict_file as predict_hybrid
 from condition_aware_anomaly import load, score
