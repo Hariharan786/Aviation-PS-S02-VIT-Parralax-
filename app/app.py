@@ -759,10 +759,31 @@ elif page == "Engine Health":
         st.altair_chart(alt.vconcat(c_anom, c_zscore).resolve_scale(y="independent"), use_container_width=True)
 
         # RUL + health score trend across all cycles for the selected engine
+        # fleet_rul typically contains one row per engine (last-cycle prediction only).
+        # When that is the case we reconstruct a synthetic per-cycle history from the
+        # anom cycle list using: RUL(c) ≈ final_RUL + (max_cycle - c)
         rul_history = fleet_rul[fleet_rul.engine_id == selected].sort_values("cycle")
+        rul_col    = "overall_RUL_cycles"   if "overall_RUL_cycles"   in rul_history.columns else "ensemble_RUL_cycles"
+        health_col = "overall_health_score" if "overall_health_score" in rul_history.columns else "ensemble_health_score"
+
         if not rul_history.empty:
-            rul_col    = "overall_RUL_cycles"    if "overall_RUL_cycles"    in rul_history.columns else "ensemble_RUL_cycles"
-            health_col = "overall_health_score"  if "overall_health_score"  in rul_history.columns else "ensemble_health_score"
+            if len(rul_history) <= 1:
+                # Build synthetic history from anom cycles
+                final_row    = rul_history.iloc[-1]
+                final_rul    = float(final_row[rul_col])
+                final_health = float(final_row[health_col])
+                final_cycle  = int(final_row["cycle"])
+
+                cycles_anom  = trend["cycle"].astype(int).sort_values().values
+                min_cycle    = int(cycles_anom.min()) if len(cycles_anom) else 1
+
+                rul_series    = [final_rul + (final_cycle - int(c)) for c in cycles_anom]
+                # Linear health: 100 at first cycle → final_health at last cycle
+                health_series = [
+                    100.0 + (final_health - 100.0) * (int(c) - min_cycle) / max(final_cycle - min_cycle, 1)
+                    for c in cycles_anom
+                ]
+                rul_history = pd.DataFrame({"cycle": cycles_anom, rul_col: rul_series, health_col: health_series})
 
             c_rul = alt.Chart(rul_history.reset_index()).mark_line(color="#a855f7").encode(
                 x=alt.X("cycle:Q", title="Cycle"),
