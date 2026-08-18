@@ -5,20 +5,17 @@ import pandas as pd
 import numpy as np
 import altair as alt
 
-# ---------------------------------------------------------------------------
-# Try to import httpx for the Live Telemetry mode (graceful fallback)
-# ---------------------------------------------------------------------------
-try:
-    import httpx
-    _HTTPX_OK = True
-except ImportError:
-    _HTTPX_OK = False
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "model"))
 from hybrid_predictor import predict_file as predict_hybrid
 from condition_aware_anomaly import load, score
 from bearing_vibration import build_bearing_summary, add_bearing_status, synthesize_cycle_waveform, vibration_spectrum
+
+# ---------------------------------------------------------------------------
+# Import the physics telemetry generator (runs in-process on Streamlit Cloud)
+# ---------------------------------------------------------------------------
+sys.path.insert(0, str(ROOT))
+from generate_fd001_physics_telemetry import generate as _generate_telemetry
 
 st.set_page_config(page_title="FlightPret", page_icon="", layout="wide")
 
@@ -138,7 +135,6 @@ st.caption("--------------------------------------------------------------------
 # Global Settings
 # ---------------------------------------------------------------------------
 dataset = "FD001"
-API_BASE = "http://localhost:8000"
 
 def no_data_warning():
     st.markdown("""
@@ -148,6 +144,16 @@ def no_data_warning():
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Session State Initialisation (Live Telemetry buffer)
+# ---------------------------------------------------------------------------
+if "live_raw_txt" not in st.session_state:
+    st.session_state.live_raw_txt = ""
+if "live_rows" not in st.session_state:
+    st.session_state.live_rows = 0
+if "live_generated" not in st.session_state:
+    st.session_state.live_generated = False
 
 # ---------------------------------------------------------------------------
 # Sidebar Navigation & Upload
@@ -409,21 +415,9 @@ def render_bearing_analysis(telemetry_df, selected_engine=None):
 # ---------------------------------------------------------------------------
 # Data Resolution Logic (Live vs Upload)
 # ---------------------------------------------------------------------------
-is_live = False
-rows_ready = 0
-raw_txt = ""
-
-if _HTTPX_OK:
-    try:
-        status_resp = httpx.get(f"{API_BASE}/status", timeout=3)
-        server_status = status_resp.json()
-        rows_ready = server_status.get("rows_accumulated", 0)
-        is_live    = server_status.get("streaming", False)
-        if rows_ready > 0:
-            telem_resp = httpx.get(f"{API_BASE}/telemetry", timeout=10)
-            raw_txt    = telem_resp.text
-    except Exception:
-        pass
+rows_ready = st.session_state.live_rows
+raw_txt    = st.session_state.live_raw_txt
+is_live    = st.session_state.live_generated
 
 # Prioritize uploaded file if present, otherwise use live telemetry
 data_source = None
@@ -435,7 +429,7 @@ if uploaded is not None:
     data_source = "upload"
     mode_indicator = "📁 Upload File"
 elif raw_txt.strip() and rows_ready >= 30:
-    raw_bytes = raw_txt.encode('utf-8')
+    raw_bytes = raw_txt.encode("utf-8")
     data_source = "live"
     mode_indicator = "Live Telemetry"
 
@@ -613,58 +607,80 @@ if page == "Overview":
 
 elif page == "Live Telemetry":
     st.header("Live Telemetry")
-    
+
     with st.expander("Live Generation Settings", expanded=(not is_live)):
-        if not _HTTPX_OK:
-            st.error("`httpx` not installed. Run `pip install httpx` and restart Streamlit.")
-        else:
-            live_num_engines     = st.slider("Engines", 2, 20, 10)
-            live_cycles          = st.slider("Cycles / engine", 10, 100, 40)
-            live_seed            = st.number_input("Random seed", value=42, step=1)
-            live_interval        = st.slider("Generation interval (s)", 0.1, 3.0, 0.5, step=0.1)
-            
-            c_start, c_stop = st.columns(2)
-            with c_start:
-                if st.button("▶ Start Telemetry", type="primary", use_container_width=True):
-                    try:
-                        httpx.post(
-                            f"{API_BASE}/generate",
-                            params={
-                                "num_engines":      live_num_engines,
-                                "cycles_per_engine": live_cycles,
-                                "seed":             int(live_seed),
-                                "interval":         live_interval,
-                            },
-                            timeout=5,
-                        )
-                        st.toast("✅ Telemetry stream started!")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Cannot reach API server: {e}\n\nMake sure `python api_server.py` is running.")
-            with c_stop:
-                if st.button("⏹ Stop Telemetry",  use_container_width=True):
-                    try:
-                        httpx.post(f"{API_BASE}/reset", timeout=5)
-                        st.toast("⏹ Stream stopped and buffer cleared.")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception:
-                        pass
-    
+        live_num_engines = st.slider("Engines", 2, 20, 10)
+        live_cycles      = st.slider("Cycles / engine", 10, 100, 40)
+        live_seed        = st.number_input("Random seed", value=42, step=1)
+
+        c_start, c_stop = st.columns(2)
+        with c_start:
+            if st.button("▶ Start Telemetry", type="primary", use_container_width=True):
+                train_file = ROOT / "train_FD001.txt"
+                if not train_file.exists():
+                    st.error(
+                        f"`train_FD001.txt` not found at `{ROOT}`. "
+                        "Make sure the training data file is present in the repository root."
+                    )
+                else:
+                    with st.spinner("Generating telemetry... this may take a few seconds."):
+                        try:
+                            tmp = tempfile.NamedTemporaryFile(
+                                delete=False, suffix="_live.txt", mode="w"
+                            )
+                            tmp_path = tmp.name
+                            tmp.close()
+
+                            _generate_telemetry(
+                                train_file=str(train_file),
+                                output_file=tmp_path,
+                                num_engines=int(live_num_engines),
+                                cycles_per_engine=int(live_cycles),
+                                seed=int(live_seed),
+                                generate_bearing=False,  # skip CSV side-effects on cloud
+                            )
+
+                            with open(tmp_path, "r") as f:
+                                generated_txt = f.read()
+
+                            try:
+                                os.unlink(tmp_path)
+                            except OSError:
+                                pass
+
+                            total_rows = live_num_engines * live_cycles
+                            st.session_state.live_raw_txt  = generated_txt
+                            st.session_state.live_rows     = total_rows
+                            st.session_state.live_generated = True
+                            # Clear the inference cache so it re-runs on the new data
+                            cached_process_telemetry.clear()
+                            st.toast(f"✅ {total_rows} telemetry rows generated!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Generation failed: {e}")
+                            st.exception(e)
+
+        with c_stop:
+            if st.button("⏹ Stop / Clear Telemetry", use_container_width=True):
+                st.session_state.live_raw_txt   = ""
+                st.session_state.live_rows      = 0
+                st.session_state.live_generated = False
+                cached_process_telemetry.clear()
+                st.toast("⏹ Telemetry buffer cleared.")
+                st.rerun()
+
     st.divider()
 
-    if _HTTPX_OK:
-        status_placeholder = st.empty()
-        if is_live:
-            status_placeholder.success(f"{rows_ready} rows accumulated and counting…")
-        elif rows_ready > 0:
-            status_placeholder.info(f"⏸{rows_ready} rows in buffer (press ▶ Start to resume).")
-        else:
-            status_placeholder.warning("▶ Start the telemetry above to see live data.")
-            
-        if 0 < rows_ready < 30:
-            st.info(f"Waiting for at least 30 rows before running the pipeline (currently {rows_ready}).")
+    status_placeholder = st.empty()
+    if is_live and rows_ready > 0:
+        status_placeholder.success(f"✅ {rows_ready} rows in buffer — ready for analysis.")
+    elif rows_ready > 0:
+        status_placeholder.info(f"⏸ {rows_ready} rows in buffer (press ▶ Start to regenerate).")
+    else:
+        status_placeholder.warning("▶ Press Start Telemetry above to generate live data.")
+
+    if 0 < rows_ready < 30:
+        st.info(f"Waiting for at least 30 rows before running the pipeline (currently {rows_ready}).")
 
     if raw_anom is not None and not raw_anom.empty:
         st.subheader("Raw Telemetry Data")
@@ -695,10 +711,6 @@ elif page == "Live Telemetry":
                     st.altair_chart(chart, use_container_width=True)
             else:
                 st.write("No data for this engine.")
-                
-    if is_live:
-        time.sleep(8)
-        st.rerun()
 
 elif page == "Engine Health":
     st.header("Engine Health")
