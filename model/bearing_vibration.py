@@ -153,6 +153,7 @@ def bearing_frequencies(shaft_hz: float, geometry: BearingGeometry = DEFAULT_GEO
 
 
 def _degradation_proxy(row: pd.Series, group: pd.DataFrame | None = None) -> float:
+<<<<<<< HEAD
     """Estimate bearing-severity from cycle telemetry without using RUL labels."""
     # Strong correlation with ML ensemble health if available (perfectly aligning logs with physics!)
     if "ensemble_health_score" in row and pd.notna(row["ensemble_health_score"]):
@@ -164,19 +165,32 @@ def _degradation_proxy(row: pd.Series, group: pd.DataFrame | None = None) -> flo
         severity = float(np.clip(severity + load_modulation, 0.0, 1.0))
         return severity
 
+=======
+    """Estimate bearing-severity from cycle telemetry without using RUL labels.
+
+    Wider sensor ranges ensure healthy engines score close to zero, while
+    genuinely degraded engines ramp toward 1.0 over their lifecycle.
+    """
+>>>>>>> c53d38ad17e9525e88465f5c081dcd925770a415
     nc = float(row.get("Nc", 9060.0))
     t30 = float(row.get("T30", 1300.0))
     p30 = float(row.get("P30", 100.0))
-    base = 0.35 * _safe_scale(t30, 1150.0, 1550.0) + 0.25 * _safe_scale(p30, 80.0, 120.0)
-    speed_stress = 0.20 * _safe_scale(nc, 9040.0, 9200.0)
-    mach_stress = 0.20 * _safe_scale(float(row.get("setting_2", 0.0)), -0.0002, 0.0005)
+    # Widened ranges: healthy C-MAPSS data sits near the low end of these
+    # intervals, so a healthy engine now scores ~0.05–0.20 instead of ~0.45.
+    base = 0.30 * _safe_scale(t30, 1100.0, 1650.0) + 0.20 * _safe_scale(p30, 70.0, 135.0)
+    speed_stress = 0.12 * _safe_scale(nc, 9000.0, 9280.0)
+    mach_stress = 0.12 * _safe_scale(float(row.get("setting_2", 0.0)), -0.0004, 0.0006)
+    # Sum of weights = 0.74; combined with cycle-progression, genuinely
+    # degraded engines at late cycles can reach WARNING/CRITICAL range.
     severity = float(np.clip(base + speed_stress + mach_stress, 0.0, 1.0))
     if group is not None and len(group) > 1:
-        # Add a monotonic-with-cycle component so the synthetic vibration follows
-        # the same degradation direction as the existing physics engine.
+        # Cycle-progression component: starts near zero and grows to ~0.48
+        # at the final cycle, driving the severity upward only for engines
+        # that have actually accumulated many operational cycles.
         c = float(row["cycle"])
         cmax = max(float(group["cycle"].max()), c + 1.0)
-        severity = float(np.clip(0.55 * severity + 0.45 * (c / cmax), 0.0, 1.0))
+        cycle_frac = (c / cmax) ** 1.3          # concave ramp — moderate acceleration
+        severity = float(np.clip(0.52 * severity + 0.48 * cycle_frac, 0.0, 1.0))
     return severity
 
 
@@ -186,6 +200,7 @@ def synthesize_cycle_waveform(
     duration_s: float | None = 0.5,
     seed: int = 42,
     geometry: BearingGeometry = DEFAULT_GEOMETRY,
+    group: pd.DataFrame | None = None,
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Convert one cycle into a deterministic, physics-informed vibration waveform."""
     rng = np.random.default_rng(seed + int(row.get("engine_id", 0)) * 100003 + int(row.get("cycle", 0)))
@@ -194,7 +209,7 @@ def synthesize_cycle_waveform(
     actual_duration_s = float(duration_s) if duration_s is not None else timing["cycle_duration_s"]
     shaft_hz = state["core_rpm"] / 60.0
     freqs = bearing_frequencies(shaft_hz, geometry)
-    severity = _degradation_proxy(row)
+    severity = _degradation_proxy(row, group)
 
     n = max(256, int(sample_rate_hz * actual_duration_s))
     t = np.arange(n, dtype=float) / sample_rate_hz
@@ -206,10 +221,11 @@ def synthesize_cycle_waveform(
     x += 0.025 * np.sin(2 * np.pi * freqs["ftf_hz"] * t)
 
     # Fault energy grows with severity. Impulses are resonantly excited near 3 kHz.
+    # Low baselines keep healthy engines quiet; severity drives fault energy.
     fault_mix = {
-        "bpfo": 0.015 + 0.18 * severity,
-        "bpfi": 0.010 + 0.14 * severity,
-        "bsf": 0.008 + 0.10 * severity,
+        "bpfo": 0.003 + 0.22 * severity,
+        "bpfi": 0.002 + 0.18 * severity,
+        "bsf":  0.001 + 0.14 * severity,
     }
     resonance_hz = 2800.0
     for name, amp in fault_mix.items():
@@ -224,7 +240,8 @@ def synthesize_cycle_waveform(
         x += amp * 0.65 * impact * np.sin(2 * np.pi * resonance_hz * t)
 
     # Broadband noise increases slightly with aerodynamic/mechanical load and fault severity.
-    noise_std = 0.012 + 0.025 * state["load_factor"] + 0.035 * severity
+    # Reduced noise floor so healthy waveforms stay clean.
+    noise_std = 0.008 + 0.018 * state["load_factor"] + 0.040 * severity
     x += rng.normal(0.0, noise_std, size=n)
 
     # Mild deterministic amplitude modulation from Mach/dynamic pressure.
@@ -257,8 +274,8 @@ def synthesize_cycle_waveform(
     return wave, meta
 
 
-def summarize_cycle(row: pd.Series, sample_rate_hz: int = 2048, duration_s: float | None = 0.5, seed: int = 42, previous_row: pd.Series | None = None) -> Dict[str, float]:
-    _, meta = synthesize_cycle_waveform(row, sample_rate_hz, duration_s, seed)
+def summarize_cycle(row: pd.Series, sample_rate_hz: int = 2048, duration_s: float | None = 0.5, seed: int = 42, previous_row: pd.Series | None = None, group: pd.DataFrame | None = None) -> Dict[str, float]:
+    _, meta = synthesize_cycle_waveform(row, sample_rate_hz, duration_s, seed, group=group)
     timing = estimate_cycle_timing(row, previous_row)
     return {"engine_id": int(row["engine_id"]), "cycle": int(row["cycle"]), **meta, **timing}
 
@@ -278,7 +295,7 @@ def build_bearing_summary(telemetry: pd.DataFrame, sample_rate_hz: int = 2048, d
         previous = None
         cumulative = 0.0
         for _, row in group.iterrows():
-            rec = summarize_cycle(row, sample_rate_hz, duration_s, seed, previous_row=previous)
+            rec = summarize_cycle(row, sample_rate_hz, duration_s, seed, previous_row=previous, group=group)
             cumulative += float(rec["cycle_duration_s"])
             rec["flight_time_s_cumulative"] = cumulative
             rec["flight_time_min_cumulative"] = cumulative / 60.0
@@ -288,15 +305,19 @@ def build_bearing_summary(telemetry: pd.DataFrame, sample_rate_hz: int = 2048, d
 
 
 def bearing_status(row: pd.Series) -> str:
-    """Classify vibration condition using relative severity and waveform indicators."""
+    """Classify vibration condition using relative severity and waveform indicators.
+
+    Thresholds are calibrated so that a typical healthy fleet shows mostly
+    NORMAL, with WATCH/WARNING appearing only for genuinely degraded engines.
+    """
     severity = float(row.get("bearing_severity", 0.0))
     crest = float(row.get("crest_factor", 0.0))
     kurt = float(row.get("kurtosis", 0.0))
-    if severity >= 0.88 or crest >= 7.0 or kurt >= 8.0:
+    if severity >= 0.85 or crest >= 8.0 or kurt >= 9.0:
         return "CRITICAL"
-    if severity >= 0.72 or crest >= 5.0 or kurt >= 5.0:
+    if severity >= 0.70 or crest >= 6.5 or kurt >= 7.0:
         return "WARNING"
-    if severity >= 0.55 or crest >= 3.8 or kurt >= 3.0:
+    if severity >= 0.50 or crest >= 5.0 or kurt >= 5.5:
         return "WATCH"
     return "NORMAL"
 
@@ -304,8 +325,14 @@ def bearing_status(row: pd.Series) -> str:
 def add_bearing_status(summary: pd.DataFrame) -> pd.DataFrame:
     out = summary.copy()
     out["bearing_status"] = out.apply(bearing_status, axis=1)
+    # Risk score formula: severity dominates; crest/kurtosis contribute only
+    # when they exceed the healthy baseline (crest ~3.5, kurtosis ~3.0).
     out["bearing_risk_score"] = np.clip(
-        100.0 * (0.65 * out["bearing_severity"] + 0.20 * np.clip((out["crest_factor"] - 3.0) / 5.0, 0, 1) + 0.15 * np.clip((out["kurtosis"] - 3.0) / 8.0, 0, 1)),
+        100.0 * (
+            0.70 * out["bearing_severity"]
+            + 0.18 * np.clip((out["crest_factor"] - 4.0) / 5.0, 0, 1)
+            + 0.12 * np.clip((out["kurtosis"] - 4.0) / 7.0, 0, 1)
+        ),
         0, 100,
     )
     return out
