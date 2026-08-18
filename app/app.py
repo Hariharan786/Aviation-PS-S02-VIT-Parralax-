@@ -611,8 +611,16 @@ if page == "Overview":
             st.altair_chart(chart_te, use_container_width=True)
             
         st.subheader("Engine-by-Engine Maintenance Briefing")
-        for brief in engine_briefs:
-            st.write("• " + brief)
+        engine_ids = fleet.sort_values("engine_id")["engine_id"].tolist()
+        brief_map  = {int(row["engine_id"]): engine_verbal_summary(row) for _, row in fleet.sort_values("engine_id").iterrows()}
+        selected_brief_engine = st.selectbox(
+            "Select Engine for Maintenance Brief",
+            options=engine_ids,
+            format_func=lambda e: f"Engine {int(e)}",
+            key="brief_engine_select",
+        )
+        if selected_brief_engine is not None:
+            st.info(brief_map[int(selected_brief_engine)])
 
         st.download_button(
             "Download verbal maintenance briefing", full_brief.encode("utf-8"),
