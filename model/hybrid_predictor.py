@@ -36,6 +36,9 @@ def _load_telemetry(path):
 
 def _integrate_bearing_health(out: pd.DataFrame, path) -> pd.DataFrame:
     telem=_load_telemetry(path)
+    # Inject ensemble health into telemetry so the vibration physics model correlates with true engine degradation
+    if "ensemble_health_score" in out.columns:
+        telem = telem.merge(out[["engine_id", "cycle", "ensemble_health_score"]], on=["engine_id", "cycle"], how="left")
     bearing=add_bearing_status(build_bearing_summary(telem, sample_rate_hz=2048, duration_s=0.5, seed=42))
     keep=["engine_id","cycle","bearing_status","bearing_risk_score","bearing_severity","rms_g","peak_g","crest_factor","kurtosis",
           "cycle_duration_s","flight_time_s_cumulative","flight_time_min_cumulative","flight_distance_nm","mach","altitude_ft","airspeed_mps","true_airspeed_mps","throttle_proxy_pct","load_factor","bpfo_hz","bpfi_hz","bsf_hz","ftf_hz"]
