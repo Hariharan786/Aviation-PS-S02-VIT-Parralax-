@@ -129,12 +129,12 @@ a {
 st.markdown(custom_css, unsafe_allow_html=True)
 
 st.title("FlightPret — Aircraft Engine Health & Predictive Maintenance")
-st.caption("-----------------------------------------------------------------------")
+st.caption("Use the **Dataset Selection** dropdown in the sidebar to switch between C-MAPSS datasets (FD001 – FD004).")
 
 # ---------------------------------------------------------------------------
 # Global Settings
 # ---------------------------------------------------------------------------
-dataset = "FD001"
+# Dataset is now dynamic in the sidebar
 
 def no_data_warning():
     st.markdown("""
@@ -146,7 +146,7 @@ def no_data_warning():
     """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Session State Initialisation (Live Telemetry buffer)
+# Session State Initialisation (Live Telemetry buffer + Dataset)
 # ---------------------------------------------------------------------------
 if "live_raw_txt" not in st.session_state:
     st.session_state.live_raw_txt = ""
@@ -154,6 +154,8 @@ if "live_rows" not in st.session_state:
     st.session_state.live_rows = 0
 if "live_generated" not in st.session_state:
     st.session_state.live_generated = False
+if "dataset" not in st.session_state:
+    st.session_state.dataset = "FD001"
 
 # ---------------------------------------------------------------------------
 # Sidebar Navigation & Upload
@@ -163,9 +165,26 @@ with st.sidebar:
     page = st.radio("Go to", ["Overview", "Live Telemetry", "Engine Health"], label_visibility="collapsed")
     
     st.markdown("---")
+    st.markdown("### Dataset Selection")
+    _selected_ds = st.selectbox(
+        "Select C-MAPSS Dataset",
+        ["FD001", "FD002", "FD003", "FD004"],
+        index=["FD001", "FD002", "FD003", "FD004"].index(st.session_state.dataset),
+        key="dataset_selectbox",
+    )
+    if _selected_ds != st.session_state.dataset:
+        st.session_state.dataset = _selected_ds
+        st.session_state.live_raw_txt = ""
+        st.session_state.live_rows = 0
+        st.session_state.live_generated = False
+        st.cache_data.clear()
+        st.rerun()
+    dataset = st.session_state.dataset
+
+    st.markdown("---")
     st.markdown("### Upload Data")
     uploaded = st.file_uploader(
-        f"Upload unseen telemetry",
+        f"Upload unseen telemetry ({dataset})",
         type=["txt", "csv"],
         help="C-MAPSS telemetry only; CSV may include the 26-column header.",
     )
@@ -616,10 +635,10 @@ elif page == "Live Telemetry":
         c_start, c_stop = st.columns(2)
         with c_start:
             if st.button("▶ Start Telemetry", type="primary", use_container_width=True):
-                train_file = ROOT / "train_FD001.txt"
+                train_file = ROOT / f"train_{dataset}.txt"
                 if not train_file.exists():
                     st.error(
-                        f"`train_FD001.txt` not found at `{ROOT}`. "
+                        f"`train_{dataset}.txt` not found at `{ROOT}`. "
                         "Make sure the training data file is present in the repository root."
                     )
                 else:
