@@ -265,7 +265,6 @@ def cached_process_telemetry(raw_bytes: bytes, data_source: str, dataset_name: s
             
             # Use exceptionally fast vectorized to_csv instead of a python iter loop
             d.to_csv(out_name, sep=" ", index=False, header=False, float_format="%.12g")
-            out.close()
         else:
             out_name = src
             

@@ -253,11 +253,18 @@ def summarize_cycle(row: pd.Series, sample_rate_hz: int = 2048, duration_s: floa
     return {"engine_id": int(row["engine_id"]), "cycle": int(row["cycle"]), **meta, **timing}
 
 
-def build_bearing_summary(telemetry: pd.DataFrame, sample_rate_hz: int = 2048, duration_s: float | None = 0.5, seed: int = 42) -> pd.DataFrame:
-    """Generate one vibration-analysis record per engine/cycle, including variable flight timing."""
+def build_bearing_summary(telemetry: pd.DataFrame, sample_rate_hz: int = 2048, duration_s: float | None = 0.5, seed: int = 42, max_cycles_per_engine: int = 10) -> pd.DataFrame:
+    """Generate one vibration-analysis record per engine/cycle, including variable flight timing.
+    
+    For performance, only the last `max_cycles_per_engine` cycles per engine are
+    synthesized (set to 0 or None to process all cycles).
+    """
     records = []
     ordered = telemetry.sort_values(["engine_id", "cycle"]).copy()
     for eid, group in ordered.groupby("engine_id", sort=False):
+        # Trim to last N cycles for performance
+        if max_cycles_per_engine and len(group) > max_cycles_per_engine:
+            group = group.tail(max_cycles_per_engine)
         previous = None
         cumulative = 0.0
         for _, row in group.iterrows():
