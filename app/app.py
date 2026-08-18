@@ -743,28 +743,42 @@ elif page == "Engine Health":
         trend  = anom[anom.engine_id == selected].sort_values("cycle").copy()
         ruleng = fleet_rul[fleet_rul.engine_id == selected].sort_values("cycle")
         
-        chart_trend = alt.Chart(trend.reset_index()).transform_fold(
-            ["anomaly_score", "max_sensor_z"], as_=["Metric", "Value"]
-        ).mark_line().encode(
+        # Split anomaly_score and max_sensor_z onto separate charts to avoid crushing scale
+        c_anom = alt.Chart(trend.reset_index()).mark_line(color="#38bdf8").encode(
             x=alt.X("cycle:Q", title="Cycle"),
-            y=alt.Y("Value:Q", scale=alt.Scale(zero=False), title="Score"),
-            color="Metric:N",
-            tooltip=["cycle:Q", "Metric:N", "Value:Q"]
-        ).interactive()
-        st.altair_chart(chart_trend, use_container_width=True)
-        
-        rul_cols = [c for c in ["overall_RUL_cycles", "overall_health_score"] if c in ruleng.columns]
-        if not rul_cols:
-            rul_cols = [c for c in ["ensemble_RUL_cycles"] if c in ruleng.columns]
-        chart_rul = alt.Chart(ruleng.reset_index()).transform_fold(
-            rul_cols, as_=["Metric", "Value"]
-        ).mark_line().encode(
+            y=alt.Y("anomaly_score:Q", scale=alt.Scale(zero=False), title="Anomaly Score"),
+            tooltip=["cycle:Q", "anomaly_score:Q"]
+        ).interactive().properties(title="Anomaly Score Trend", height=200)
+
+        c_zscore = alt.Chart(trend.reset_index()).mark_line(color="#f97316").encode(
             x=alt.X("cycle:Q", title="Cycle"),
-            y=alt.Y("Value:Q", scale=alt.Scale(zero=False), title="Value"),
-            color="Metric:N",
-            tooltip=["cycle:Q", "Metric:N", "Value:Q"]
-        ).interactive()
-        st.altair_chart(chart_rul, use_container_width=True)
+            y=alt.Y("max_sensor_z:Q", scale=alt.Scale(zero=False), title="Max Sensor Z-Score"),
+            tooltip=["cycle:Q", "max_sensor_z:Q"]
+        ).interactive().properties(title="Max Sensor Z-Score Trend", height=200)
+
+        st.altair_chart(alt.vconcat(c_anom, c_zscore).resolve_scale(y="independent"), use_container_width=True)
+
+        # RUL + health score trend across all cycles for the selected engine
+        rul_history = fleet_rul[fleet_rul.engine_id == selected].sort_values("cycle")
+        if not rul_history.empty:
+            rul_col    = "overall_RUL_cycles"    if "overall_RUL_cycles"    in rul_history.columns else "ensemble_RUL_cycles"
+            health_col = "overall_health_score"  if "overall_health_score"  in rul_history.columns else "ensemble_health_score"
+
+            c_rul = alt.Chart(rul_history.reset_index()).mark_line(color="#a855f7").encode(
+                x=alt.X("cycle:Q", title="Cycle"),
+                y=alt.Y(f"{rul_col}:Q", scale=alt.Scale(zero=False), title="RUL (cycles)"),
+                tooltip=["cycle:Q", f"{rul_col}:Q"]
+            ).interactive().properties(title="Remaining Useful Life Trend", height=200)
+
+            c_health = alt.Chart(rul_history.reset_index()).mark_line(color="#22c55e").encode(
+                x=alt.X("cycle:Q", title="Cycle"),
+                y=alt.Y(f"{health_col}:Q", scale=alt.Scale(zero=False), title="Health Score (%)"),
+                tooltip=["cycle:Q", f"{health_col}:Q"]
+            ).interactive().properties(title="Health Score Trend", height=200)
+
+            st.altair_chart(alt.vconcat(c_rul, c_health).resolve_scale(y="independent"), use_container_width=True)
+        else:
+            st.info("No RUL / health history available for this engine.")
         
         st.write(
             f"Engine {selected}: anomaly **{trend.anomaly_score.iloc[-1]:.3f}**, "
