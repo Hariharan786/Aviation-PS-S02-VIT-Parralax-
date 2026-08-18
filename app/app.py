@@ -571,8 +571,16 @@ if page == "Overview":
         if not sp.empty:
             sp["sensor"] = sp["sensor"].map(lambda x: SENSOR_MAP.get(x, x))
         st.dataframe(sp, use_container_width=True, hide_index=True)
-        if not sp.empty and "absolute_spearman" in sp:
-            st.bar_chart(sp.sort_values("absolute_spearman", ascending=False).set_index("sensor")[["absolute_spearman"]])
+        # Plot Health Score vs Engine ID instead of Sensor Correlation
+        health_col = "overall_health_score" if "overall_health_score" in fleet.columns else ("ensemble_health_score" if "ensemble_health_score" in fleet.columns else None)
+        if health_col and not fleet.empty:
+            st.write("### Fleet Engine Health Scores")
+            chart_health = alt.Chart(fleet.sort_values("engine_id")).mark_bar(color="#3b82f6").encode(
+                x=alt.X("engine_id:O", title="Engine ID", sort="ascending"),
+                y=alt.Y(f"{health_col}:Q", title="Health Score (%)", scale=alt.Scale(domain=[0, 100])),
+                tooltip=["engine_id:O", f"{health_col}:Q"]
+            ).interactive().properties(height=300)
+            st.altair_chart(chart_health, use_container_width=True)
 
         if anom_metrics_path.exists() and data_source == "upload":
             st.subheader("Abnormal-Condition Evaluation")
@@ -601,15 +609,26 @@ if page == "Overview":
             df_te["smoothed_efficiency"] = df_te.groupby("engine_id")["thermal_efficiency"].transform(
                 lambda x: x.ewm(span=15, adjust=False).mean()
             )
+            # Get the final efficiency for each engine to find top 5 and bottom 5
+            final_eff = df_te.loc[df_te.groupby("engine_id")["cycle"].idxmax()][["engine_id", "smoothed_efficiency"]]
+            best_5 = final_eff.nlargest(5, "smoothed_efficiency")["engine_id"].tolist()
+            worst_5 = final_eff.nsmallest(5, "smoothed_efficiency")["engine_id"].tolist()
+            target_engines = list(set(best_5 + worst_5))
             
-            chart_te = alt.Chart(df_te.reset_index()).mark_line(opacity=0.8).encode(
+            df_te_filtered = df_te[df_te["engine_id"].isin(target_engines)].copy()
+            df_te_filtered["Group"] = df_te_filtered["engine_id"].apply(
+                lambda e: "Top 5 Efficiency" if e in best_5 else "Bottom 5 Efficiency"
+            )
+
+            chart_te = alt.Chart(df_te_filtered.reset_index()).mark_line(opacity=0.8).encode(
                 x=alt.X("cycle:Q", title="Cycle"),
                 y=alt.Y("smoothed_efficiency:Q", scale=alt.Scale(zero=False), title="Ideal Brayton Efficiency (smoothed)"),
                 color=alt.Color("engine_id:N", legend=alt.Legend(title="Engine ID")),
-                tooltip=["engine_id:N", "cycle:Q", "smoothed_efficiency:Q"]
+                strokeDash=alt.StrokeDash("Group:N", legend=alt.Legend(title="Category")),
+                tooltip=["engine_id:N", "cycle:Q", "smoothed_efficiency:Q", "Group:N"]
             ).interactive()
             st.altair_chart(chart_te, use_container_width=True)
-            
+
         st.subheader("Engine-by-Engine Maintenance Briefing")
         engine_ids = fleet.sort_values("engine_id")["engine_id"].tolist()
         brief_map  = {int(row["engine_id"]): engine_verbal_summary(row) for _, row in fleet.sort_values("engine_id").iterrows()}
