@@ -261,11 +261,10 @@ def cached_process_telemetry(raw_bytes: bytes, data_source: str, dataset_name: s
             d.cycle     = d.cycle.astype(int)
             out = tempfile.NamedTemporaryFile(delete=False, suffix="_normalized.txt", mode="w", newline="")
             out_name = out.name
-            for _, r in d.iterrows():
-                out.write(" ".join(
-                    str(int(r[c])) if c in ["engine_id", "cycle"] else f"{float(r[c]):.12g}"
-                    for c in COLUMNS
-                ) + "\n")
+            out.close() # Close immediately so pandas can write to it
+            
+            # Use exceptionally fast vectorized to_csv instead of a python iter loop
+            d.to_csv(out_name, sep=" ", index=False, header=False, float_format="%.12g")
             out.close()
         else:
             out_name = src
