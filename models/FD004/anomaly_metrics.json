@@ -1,0 +1,151 @@
+{
+  "dataset": "FD004",
+  "condition_count": 6,
+  "validation_engines": 49,
+  "proxy_definition": "abnormal=RUL<=40; normal=RUL>=80; ambiguous 41-79 excluded",
+  "precision": 0.6714439269079183,
+  "recall": 0.9328023892483823,
+  "f1": 0.7808333333333334,
+  "confusion_matrix": [
+    [
+      7494,
+      917
+    ],
+    [
+      135,
+      1874
+    ]
+  ],
+  "detected_engines": 49,
+  "missed_engines": 0,
+  "mean_detection_delay_cycles": 0.9795918367346939,
+  "median_detection_delay_cycles": 0.0,
+  "sensor_performance": [
+    {
+      "sensor": "NRf",
+      "spearman_r": -0.39265585332676434,
+      "absolute_spearman": 0.39265585332676434,
+      "signal": "MODERATE"
+    },
+    {
+      "sensor": "NRc",
+      "spearman_r": -0.18432365008436533,
+      "absolute_spearman": 0.18432365008436533,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "Ps30",
+      "spearman_r": -0.18205682845399324,
+      "absolute_spearman": 0.18205682845399324,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "T50",
+      "spearman_r": -0.17289947952456816,
+      "absolute_spearman": 0.17289947952456816,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "T30",
+      "spearman_r": -0.14112164069883298,
+      "absolute_spearman": 0.14112164069883298,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "htBleed",
+      "spearman_r": -0.13901510929971736,
+      "absolute_spearman": 0.13901510929971736,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "Nc",
+      "spearman_r": -0.12990561606066067,
+      "absolute_spearman": 0.12990561606066067,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "T24",
+      "spearman_r": -0.1033615965276678,
+      "absolute_spearman": 0.1033615965276678,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "Nf",
+      "spearman_r": -0.09549995119285794,
+      "absolute_spearman": 0.09549995119285794,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "farB",
+      "spearman_r": -0.07320638011598568,
+      "absolute_spearman": 0.07320638011598568,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "epr",
+      "spearman_r": -0.06340687339635101,
+      "absolute_spearman": 0.06340687339635101,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "P15",
+      "spearman_r": -0.05062949781768701,
+      "absolute_spearman": 0.05062949781768701,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "phi",
+      "spearman_r": -0.041442091536709635,
+      "absolute_spearman": 0.041442091536709635,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "P30",
+      "spearman_r": -0.041085015083234484,
+      "absolute_spearman": 0.041085015083234484,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "P2",
+      "spearman_r": -0.018148624152863783,
+      "absolute_spearman": 0.018148624152863783,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "T2",
+      "spearman_r": -0.018038880861332946,
+      "absolute_spearman": 0.018038880861332946,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "PCNfR_dmd",
+      "spearman_r": 0.012652486540368964,
+      "absolute_spearman": 0.012652486540368964,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "BPR",
+      "spearman_r": -0.009352608955601,
+      "absolute_spearman": 0.009352608955601,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "Nf_dmd",
+      "spearman_r": -0.00660765688825693,
+      "absolute_spearman": 0.00660765688825693,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "W32",
+      "spearman_r": -0.00539911767552135,
+      "absolute_spearman": 0.00539911767552135,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "W31",
+      "spearman_r": -0.004749533761495993,
+      "absolute_spearman": 0.004749533761495993,
+      "signal": "WEAK"
+    }
+  ]
+}

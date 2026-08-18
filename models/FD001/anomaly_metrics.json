@@ -1,0 +1,151 @@
+{
+  "dataset": "FD001",
+  "condition_count": 1,
+  "validation_engines": 20,
+  "proxy_definition": "abnormal=RUL<=40; normal=RUL>=80; ambiguous 41-79 excluded",
+  "precision": 0.851528384279476,
+  "recall": 0.9512195121951219,
+  "f1": 0.8986175115207373,
+  "confusion_matrix": [
+    [
+      2116,
+      136
+    ],
+    [
+      40,
+      780
+    ]
+  ],
+  "detected_engines": 20,
+  "missed_engines": 0,
+  "mean_detection_delay_cycles": 0.8,
+  "median_detection_delay_cycles": 0.0,
+  "sensor_performance": [
+    {
+      "sensor": "Ps30",
+      "spearman_r": -0.7035656758750721,
+      "absolute_spearman": 0.7035656758750721,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "T50",
+      "spearman_r": -0.6888726138195074,
+      "absolute_spearman": 0.6888726138195074,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "P30",
+      "spearman_r": 0.6719912741040878,
+      "absolute_spearman": 0.6719912741040878,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "phi",
+      "spearman_r": 0.6718021577470239,
+      "absolute_spearman": 0.6718021577470239,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "BPR",
+      "spearman_r": -0.6621238198367951,
+      "absolute_spearman": 0.6621238198367951,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "W31",
+      "spearman_r": 0.6525656492064551,
+      "absolute_spearman": 0.6525656492064551,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "W32",
+      "spearman_r": 0.6375584586223325,
+      "absolute_spearman": 0.6375584586223325,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "htBleed",
+      "spearman_r": -0.6317978111772233,
+      "absolute_spearman": 0.6317978111772233,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "T24",
+      "spearman_r": -0.6294039114197187,
+      "absolute_spearman": 0.6294039114197187,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "T30",
+      "spearman_r": -0.6093894495206054,
+      "absolute_spearman": 0.6093894495206054,
+      "signal": "STRONG"
+    },
+    {
+      "sensor": "Nf",
+      "spearman_r": -0.512311304762986,
+      "absolute_spearman": 0.512311304762986,
+      "signal": "MODERATE"
+    },
+    {
+      "sensor": "NRf",
+      "spearman_r": -0.5037434984740681,
+      "absolute_spearman": 0.5037434984740681,
+      "signal": "MODERATE"
+    },
+    {
+      "sensor": "Nc",
+      "spearman_r": -0.33722358401434915,
+      "absolute_spearman": 0.33722358401434915,
+      "signal": "MODERATE"
+    },
+    {
+      "sensor": "NRc",
+      "spearman_r": -0.248512597660364,
+      "absolute_spearman": 0.248512597660364,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "P15",
+      "spearman_r": -0.10111383051297933,
+      "absolute_spearman": 0.10111383051297933,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "P2",
+      "spearman_r": 0.0,
+      "absolute_spearman": 0.0,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "T2",
+      "spearman_r": 0.0,
+      "absolute_spearman": 0.0,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "epr",
+      "spearman_r": 0.0,
+      "absolute_spearman": 0.0,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "farB",
+      "spearman_r": 0.0,
+      "absolute_spearman": 0.0,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "PCNfR_dmd",
+      "spearman_r": 0.0,
+      "absolute_spearman": 0.0,
+      "signal": "WEAK"
+    },
+    {
+      "sensor": "Nf_dmd",
+      "spearman_r": 0.0,
+      "absolute_spearman": 0.0,
+      "signal": "WEAK"
+    }
+  ]
+}
